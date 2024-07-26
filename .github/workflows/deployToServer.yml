@@ -1,0 +1,59 @@
+name: Deploy to Server on push event
+
+on:
+  push:
+    branches:
+      - main 
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+
+    - name: Check Node.js version
+      run: node --version
+
+    - name: Check NPM version
+      run: npm --version
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Build project
+      run: npm run build
+
+    - name: Deploy to Server
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        SSH_HOST: ${{ secrets.SSH_HOST }}
+        SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+      run: |
+        set -e
+        echo "$SSH_PRIVATE_KEY" > id_rsa
+        chmod 600 id_rsa
+        mkdir -p ~/.ssh
+        ssh-keyscan $SSH_HOST >> ~/.ssh/known_hosts
+        scp -i id_rsa -r ./dist $SSH_USERNAME@$SSH_HOST:/root/image/ || { echo 'SCP failed'; exit 2; }
+
+        ssh -i id_rsa $SSH_USERNAME@$SSH_HOST << 'EOF'
+          set -e
+          cd /root/image/
+          npm install || { echo 'npm install failed'; exit 2; }
+          pm2 restart all || { echo 'PM2 restart failed'; exit 2; }
+        EOF
+
+    - name: Update PM2
+      env:
+        SSH_HOST: ${{ secrets.SSH_HOST }}
+        SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+      run: ssh -i id_rsa $SSH_USERNAME@$SSH_HOST "pm2 update" || { echo 'PM2 update failed'; exit 2; }
+
+
